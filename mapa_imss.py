@@ -5,81 +5,132 @@ from folium.plugins import FloatImage
 from streamlit_folium import st_folium
 
 # 1. Configuración de la interfaz
-st.set_page_config(layout="wide", page_title="Unidades Médicas OOAD Oaxaca IMSS")
+st.set_page_config(layout="wide", page_title="Mapa Interactivo IMSS Oaxaca")
 st.title("Unidades Médicas en el OOAD Oaxaca IMSS")
 
 @st.cache_data
 def cargar_datos():
-    # Leer el catálogo y filtrar Oaxaca con coordenadas válidas
+    # Leer el catálogo y filtrar Oaxaca
     df = pd.read_excel('CLUES_IMSS.xlsx')
     df_oax = df[(df['ENTIDAD'] == 'OAXACA') & (df['LATITUD'].notna()) & (df['LONGITUD'].notna())].copy()
+    
+    # Crear una categoría limpia para los filtros
+    def simplificar_tipo(tipo):
+        if 'HOSPITAL' in str(tipo): return 'Hospitales'
+        elif 'FAMILIAR' in str(tipo) or 'CLINICA' in str(tipo): return 'UMF (Clínicas)'
+        elif 'RURAL' in str(tipo): return 'UMR (Rurales)'
+        else: return 'Otras'
+    
+    df_oax['TIPO_SIMPLIFICADO'] = df_oax['NOMBRE DE TIPOLOGIA'].apply(simplificar_tipo)
     return df_oax
 
 df_oax = cargar_datos()
 
-# 2. Lógica de selección múltiple (n cantidad de unidades)
-# Las 5 unidades Amuzgo identificadas en amarillo por defecto
+# --- PANEL DE CONTROL (MENÚ LATERAL) ---
+st.sidebar.header("⚙️ Configuración Visual")
+
+# Selector de mapa de fondo
+estilo_mapa = st.sidebar.selectbox(
+    "1. Estilo geográfico del mapa:",
+    ["Mapa Claro (Sencillo)", "Satélite (Tipo Google Maps)", "Calles y Caminos"]
+)
+
+# Interruptor de división política
+mostrar_municipios = st.sidebar.toggle("Mostrar División Municipal", value=True)
+
+st.sidebar.markdown("---")
+
+# Filtros por tipo de unidad
+tipos_disponibles = df_oax['TIPO_SIMPLIFICADO'].unique().tolist()
+tipos_seleccionados = st.sidebar.multiselect(
+    "2. ¿Qué unidades deseas visualizar en el mapa?",
+    options=tipos_disponibles,
+    default=tipos_disponibles # Inicia mostrando todas
+)
+
+# Aplicar el filtro a la base de datos
+df_filtrado = df_oax[df_oax['TIPO_SIMPLIFICADO'].isin(tipos_seleccionados)]
+
+# Selector de unidades a resaltar (Por defecto el Plan Amuzgo)
 clues_amuzgo = ['OCIMS001985', 'OCIMS002970', 'OCIMS003892', 'OCIMS004172', 'OCIMS004691']
 nombres_amuzgo = df_oax[df_oax['CLUES'].isin(clues_amuzgo)]['NOMBRE DE LA UNIDAD'].tolist()
 
-st.sidebar.header("Panel de Control")
-unidades_seleccionadas = st.sidebar.multiselect(
-    "Selecciona las unidades médicas a resaltar en el mapa:",
-    options=df_oax['NOMBRE DE LA UNIDAD'].unique(),
-    default=nombres_amuzgo
+unidades_resaltadas = st.sidebar.multiselect(
+    "3. Unidades prioritarias a destacar con logo IMSS:",
+    options=df_filtrado['NOMBRE DE LA UNIDAD'].unique(),
+    default=[u for u in nombres_amuzgo if u in df_filtrado['NOMBRE DE LA UNIDAD'].values]
 )
 
-# 3. Creación del mapa base centrado en el estado de Oaxaca
-mapa = folium.Map(location=[17.0, -96.5], zoom_start=7, tiles='CartoDB positron')
+# --- CONSTRUCCIÓN DEL MAPA ---
+# Asignar la capa base seleccionada
+if estilo_mapa == "Satélite (Tipo Google Maps)":
+    tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    attr = "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+elif estilo_mapa == "Calles y Caminos":
+    tiles = "OpenStreetMap"
+    attr = None
+else:
+    tiles = "CartoDB positron"
+    attr = None
 
-# Agregar el logo institucional del IMSS en la esquina inferior izquierda
+mapa = folium.Map(location=[17.0, -96.5], zoom_start=7.5, tiles=tiles, attr=attr)
+
+# Inyectar polígonos municipales si el usuario lo solicita
+if mostrar_municipios:
+    geojson_url = "https://raw.githubusercontent.com/jboscomendoza/mexico-geojson/master/oaxaca.geojson"
+    # Ajuste dinámico de color: si es satélite, bordes verde brillante para contrastar; si es claro, gris oscuro.
+    color_borde = '#00ff00' if estilo_mapa == "Satélite (Tipo Google Maps)" else '#5a5a5a'
+    
+    folium.GeoJson(
+        geojson_url,
+        name="Municipios Oaxaca",
+        style_function=lambda feature, color=color_borde: {
+            'fillColor': '#ffffff',
+            'color': color,
+            'weight': 1.0,
+            'fillOpacity': 0.05
+        }
+    ).add_to(mapa)
+
+# Logo estático en la esquina
 logo_url = "https://upload.wikimedia.org/wikipedia/commons/4/43/IMSS_Logo.png"
 FloatImage(logo_url, bottom=3, left=3).add_to(mapa)
 
-# 4. Procesamiento e iteración de las unidades médicas
-for idx, row in df_oax.iterrows():
+# Iterar el dataframe ya filtrado y dibujar
+for idx, row in df_filtrado.iterrows():
     lat = row['LATITUD']
     lon = row['LONGITUD']
     nombre = row['NOMBRE DE LA UNIDAD']
-    tipo = row['NOMBRE DE TIPOLOGIA']
+    tipo_simp = row['TIPO_SIMPLIFICADO']
+    municipio = row['MUNICIPIO']
     
-    # Datos a desplegar al pasar el mouse
-    tooltip_text = f"<b>{nombre}</b><br>Tipo: {tipo}<br>Municipio: {row['MUNICIPIO']}"
+    tooltip_text = f"<b>{nombre}</b><br>Municipio: {municipio}<br>Tipo: {row['NOMBRE DE TIPOLOGIA']}"
     
-    if nombre in unidades_seleccionadas:
-        # Unidades resaltadas (Marcador distintivo)
+    if nombre in unidades_resaltadas:
+        # Poner logo IMSS directo en la coordenada
+        icono_imss = folium.features.CustomIcon(logo_url, icon_size=(45, 45))
         folium.Marker(
             location=[lat, lon],
-            tooltip=tooltip_text,
-            icon=folium.Icon(color='orange', icon='star', prefix='fa')
+            tooltip=tooltip_text + "<br><b>⭐ UNIDAD PLAN AMUZGO</b>",
+            icon=icono_imss,
+            z_index_offset=1000 # Lo mantiene sobre otras unidades
         ).add_to(mapa)
     else:
-        # Clasificación para el resto de las unidades
-        if 'HOSPITAL' in tipo:
-            # Hospitales
+        # Iconos normales
+        if tipo_simp == 'Hospitales':
             folium.Marker(
-                location=[lat, lon],
-                tooltip=tooltip_text,
+                location=[lat, lon], tooltip=tooltip_text,
                 icon=folium.Icon(color='red', icon='h-square', prefix='fa')
             ).add_to(mapa)
-        elif 'FAMILIAR' in tipo or 'CLINICA' in tipo:
-            # UMF (Clínicas)
+        elif tipo_simp == 'UMF (Clínicas)':
             folium.Marker(
-                location=[lat, lon],
-                tooltip=tooltip_text,
+                location=[lat, lon], tooltip=tooltip_text,
                 icon=folium.Icon(color='blue', icon='medkit', prefix='fa')
             ).add_to(mapa)
-        elif 'RURAL' in tipo:
-            # UMR (Puntos de colores)
+        elif tipo_simp == 'UMR (Rurales)':
             folium.CircleMarker(
-                location=[lat, lon],
-                radius=4,
-                color='green',
-                fill=True,
-                fill_color='green',
-                tooltip=tooltip_text
+                location=[lat, lon], radius=4, color='#2c7c54', fill=True, fill_opacity=0.8, tooltip=tooltip_text
             ).add_to(mapa)
 
-# 5. Renderizar el mapa en la aplicación
-st_folium(mapa, width=1000, height=600)
-st.caption("Instrucciones de exportación: Usa la función de impresión de tu navegador (Ctrl+P). Ajusta el formato a horizontal, elimina los márgenes y selecciona 'Guardar como PDF'.")
+# Renderizado final adaptativo al ancho de la pantalla
+st_folium(mapa, width="100%", height=700)
