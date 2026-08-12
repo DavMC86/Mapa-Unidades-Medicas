@@ -12,9 +12,9 @@ with st.expander("ℹ️ Guía rápida de uso (Haz clic para expandir)"):
     st.markdown("""
     **¿Cómo utilizar esta herramienta?**
     1. **Estilo del Mapa:** Usa el panel lateral izquierdo para cambiar el fondo. La vista 'Satélite' es ideal para observar la geografía y orografía.
-    2. **Filtro de Unidades:** Activa o desactiva las casillas para mostrar u ocultar Hospitales, UMF o UMR de la red global del estado.
-    3. **Unidades Prioritarias:** Puedes escribir o seleccionar en el buscador las clínicas que deseas destacar con un marcador especial y nombre permanente. *Por defecto, están seleccionadas las 5 unidades en transición a UMU del Plan Amuzgo.*
-    4. **Navegación:** Usa la rueda del ratón para hacer Zoom y haz clic sostenido para desplazarte por el mapa. Al pasar el puntero sobre cualquier punto, verás los detalles de esa unidad.
+    2. **Filtro de Unidades (Independiente):** Activa o desactiva las casillas para mostrar u ocultar Hospitales, UMF o UMR de la red global.
+    3. **Unidades Prioritarias (Siempre visibles):** Puedes escribir o seleccionar clínicas para destacar con un marcador especial y nombre permanente. **Nota:** Las unidades que selecciones aquí *siempre* se mostrarán en el mapa con su diseño destacado, incluso si desactivaste su categoría en el filtro de arriba.
+    4. **Navegación:** Usa la rueda del ratón para hacer Zoom y haz clic sostenido para desplazarte. Al pasar el puntero sobre cualquier punto, verás los detalles.
     """)
 
 @st.cache_data
@@ -38,7 +38,7 @@ df_oax = cargar_datos()
 # --- PANEL DE CONTROL (MENÚ LATERAL) ---
 st.sidebar.header("⚙️ Configuración Visual")
 
-# Selector de mapa de fondo (Reordenado para que 'Calles y Caminos' sea el primero)
+# Selector de mapa de fondo 
 estilo_mapa = st.sidebar.selectbox(
     "1. Estilo geográfico del mapa:",
     ["Calles y Caminos", "Satélite (Tipo Google Maps)", "Mapa Claro (Sencillo)"]
@@ -49,34 +49,86 @@ st.sidebar.markdown("---")
 # Filtros por tipo de unidad
 tipos_disponibles = df_oax['TIPO_SIMPLIFICADO'].unique().tolist()
 tipos_seleccionados = st.sidebar.multiselect(
-    "2. ¿Qué unidades deseas visualizar en el mapa?",
+    "2. ¿Qué unidades deseas visualizar en el mapa general?",
     options=tipos_disponibles,
     default=tipos_disponibles
 )
-
-# Aplicar el filtro a la base de datos
-df_filtrado = df_oax[df_oax['TIPO_SIMPLIFICADO'].isin(tipos_seleccionados)]
 
 # Selector de unidades a resaltar (Por defecto el Plan Amuzgo)
 clues_amuzgo = ['OCIMS001985', 'OCIMS002970', 'OCIMS003892', 'OCIMS004172', 'OCIMS004691']
 nombres_amuzgo = df_oax[df_oax['CLUES'].isin(clues_amuzgo)]['NOMBRE DE LA UNIDAD'].tolist()
 
+# AHORA EL SELECTOR TOMA TODA LA BASE (df_oax), NO LA FILTRADA
 unidades_resaltadas = st.sidebar.multiselect(
-    "3. Unidades prioritarias a destacar (Nombres Visibles):",
-    options=df_filtrado['NOMBRE DE LA UNIDAD'].unique(),
-    default=[u for u in nombres_amuzgo if u in df_filtrado['NOMBRE DE LA UNIDAD'].values]
+    "3. Unidades prioritarias a destacar (Nombres Visibles y siempre activas):",
+    options=df_oax['NOMBRE DE LA UNIDAD'].unique(),
+    default=nombres_amuzgo
 )
+
+# LÓGICA DE FILTRADO INDEPENDIENTE:
+# Mostrar unidad SI (Su tipo está seleccionado) O SI (Está en la lista de resaltadas)
+condicion_mostrar = (df_oax['TIPO_SIMPLIFICADO'].isin(tipos_seleccionados)) | (df_oax['NOMBRE DE LA UNIDAD'].isin(unidades_resaltadas))
+df_a_dibujar = df_oax[condicion_mostrar]
 
 st.sidebar.markdown("---")
 
-# --- SIMBOLOGÍA VISUAL EN EL PANEL LATERAL ---
+# --- SIMBOLOGÍA VISUAL EN EL PANEL LATERAL (Corregida para que coincida exactamente) ---
 st.sidebar.subheader("📌 Simbología del Mapa")
-st.sidebar.markdown("""
-<div style="font-size: 14px; line-height: 2;">
-    <span><b style="color: red; font-size: 18px;">⊞</b> Hospitales</span><br>
-    <span><b style="color: blue; font-size: 18px;">➕</b> UMF (Clínicas)</span><br>
-    <span><b style="color: #2c7c54; font-size: 18px;">●</b> UMR (Puntos Verdes)</span><br>
-    <span><b style="color: darkgreen; font-size: 18px;">⭐</b> <b>Unidades Destacadas (Prioritarias)</b></span>
+
+estilo_pin = """
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 30px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    margin-right: 15px;
+    margin-left: 5px;
+    color: white;
+    font-size: 12px;
+    box-shadow: -1px 1px 3px rgba(0,0,0,0.5);
+"""
+estilo_icono_interior = "transform: rotate(45deg); font-family: sans-serif; font-weight: bold;"
+
+st.sidebar.markdown(f"""
+<div style="font-size: 15px; line-height: 2.5; display: flex; flex-direction: column; gap: 8px;">
+    
+    <!-- Hospitales (Pin Rojo con H) -->
+    <div style="display: flex; align-items: center;">
+        <div style="{estilo_pin} background-color: #d33d2a;">
+            <span style="{estilo_icono_interior}">H</span>
+        </div>
+        <span>Hospitales</span>
+    </div>
+
+    <!-- UMF (Pin Azul con Cruz) -->
+    <div style="display: flex; align-items: center;">
+        <div style="{estilo_pin} background-color: #38aadd;">
+            <span style="{estilo_icono_interior}">+</span>
+        </div>
+        <span>UMF (Clínicas)</span>
+    </div>
+
+    <!-- UMR (Punto Verde) -->
+    <div style="display: flex; align-items: center;">
+        <div style="
+            width: 12px; height: 12px; 
+            border-radius: 50%; 
+            background-color: #2c7c54; 
+            border: 2px solid #2c7c54;
+            margin-left: 10px; margin-right: 22px;">
+        </div>
+        <span>UMR (Rurales)</span>
+    </div>
+
+    <!-- Prioritarias (Pin Verde Oscuro con Estrella) -->
+    <div style="display: flex; align-items: center;">
+        <div style="{estilo_pin} background-color: #006400;">
+            <span style="{estilo_icono_interior}">★</span>
+        </div>
+        <b>Unidades Destacadas</b>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -94,8 +146,8 @@ else:
 
 mapa = folium.Map(location=[17.0, -96.5], zoom_start=7.5, tiles=tiles, attr=attr)
 
-# Iterar el dataframe ya filtrado y dibujar
-for idx, row in df_filtrado.iterrows():
+# Iterar el dataframe combinado y dibujar
+for idx, row in df_a_dibujar.iterrows():
     lat = row['LATITUD']
     lon = row['LONGITUD']
     nombre = row['NOMBRE DE LA UNIDAD']
@@ -113,7 +165,7 @@ for idx, row in df_filtrado.iterrows():
             z_index_offset=1000 # Lo mantiene sobre otras unidades
         ).add_to(mapa)
         
-        # 2. Etiqueta de Texto Permanente (DivIcon)
+        # 2. Etiqueta de Texto Permanente (Movida a la IZQUIERDA)
         etiqueta_html = f"""
             <div style="
                 background-color: rgba(255, 255, 255, 0.85);
@@ -125,7 +177,8 @@ for idx, row in df_filtrado.iterrows():
                 color: #1a1a1a;
                 white-space: nowrap;
                 box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-                transform: translate(-10px, -35px); /* Sube y mueve la etiqueta */
+                /* calc(-100% - 15px) mueve la caja totalmente a la izquierda del pin */
+                transform: translate(calc(-100% - 15px), -15px); 
             ">
                 {nombre}
             </div>
@@ -136,16 +189,16 @@ for idx, row in df_filtrado.iterrows():
         ).add_to(mapa)
 
     else:
-        # Iconos normales (los que no están resaltados)
+        # Iconos normales (solo se dibujan si pasaron el filtro general)
         if tipo_simp == 'Hospitales':
             folium.Marker(
                 location=[lat, lon], tooltip=tooltip_text,
-                icon=folium.Icon(color='red', icon='h-square', prefix='fa')
+                icon=folium.Icon(color='red', icon='h-square', prefix='fa') # Folium usa 'red' (rojo) y FontAwesome 'h-square' (H en cuadro)
             ).add_to(mapa)
         elif tipo_simp == 'UMF (Clínicas)':
             folium.Marker(
                 location=[lat, lon], tooltip=tooltip_text,
-                icon=folium.Icon(color='blue', icon='medkit', prefix='fa')
+                icon=folium.Icon(color='blue', icon='medkit', prefix='fa') # Folium usa 'blue' (azul) y FontAwesome 'medkit' (cruz)
             ).add_to(mapa)
         elif tipo_simp == 'UMR (Rurales)':
             folium.CircleMarker(
