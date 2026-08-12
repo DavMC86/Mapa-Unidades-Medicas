@@ -35,9 +35,6 @@ estilo_mapa = st.sidebar.selectbox(
     ["Mapa Claro (Sencillo)", "Satélite (Tipo Google Maps)", "Calles y Caminos"]
 )
 
-# Interruptor de división política
-mostrar_municipios = st.sidebar.toggle("Mostrar División Municipal", value=True)
-
 st.sidebar.markdown("---")
 
 # Filtros por tipo de unidad
@@ -74,57 +71,6 @@ else:
     attr = None
 
 mapa = folium.Map(location=[17.0, -96.5], zoom_start=7.5, tiles=tiles, attr=attr)
-
-# Inyectar polígonos municipales si el usuario lo solicita
-if mostrar_municipios:
-    import requests
-    
-    geojson_url = "https://raw.githubusercontent.com/jboscomendoza/mexico-geojson/master/oaxaca.geojson"
-    backup_url = "https://raw.githubusercontent.com/isaacperez/mexico-geojson/master/oaxaca.json"
-    
-    color_borde = '#00ff00' if estilo_mapa == "Satélite (Tipo Google Maps)" else '#5a5a5a'
-    
-    # Función para intentar descargar de forma segura
-    def descargar_fronteras(url):
-        try:
-            respuesta = requests.get(url, timeout=5)
-            if respuesta.status_code == 200:
-                return respuesta.json() # Retorna las coordenadas válidas
-        except:
-            return None
-        return None
-
-    # Intentamos con la URL principal, si falla vamos al respaldo
-    datos_municipios = descargar_fronteras(geojson_url)
-    if not datos_municipios:
-        datos_municipios = descargar_fronteras(backup_url)
-
-    if datos_municipios:
-        folium.GeoJson(
-            datos_municipios,
-            name="Municipios Oaxaca",
-            style_function=lambda feature, color=color_borde: {
-                'fillColor': '#ffffff',
-                'color': color,
-                'weight': 1.0,
-                'fillOpacity': 0.05
-            }
-        ).add_to(mapa)
-    else:
-        st.sidebar.warning("⚠️ No se pudo descargar la división política. Mostrando mapa base y unidades médicas.")
-    # Ajuste dinámico de color: si es satélite, bordes verde brillante para contrastar; si es claro, gris oscuro.
-    color_borde = '#00ff00' if estilo_mapa == "Satélite (Tipo Google Maps)" else '#5a5a5a'
-    
-    folium.GeoJson(
-        geojson_url,
-        name="Municipios Oaxaca",
-        style_function=lambda feature, color=color_borde: {
-            'fillColor': '#ffffff',
-            'color': color,
-            'weight': 1.0,
-            'fillOpacity': 0.05
-        }
-    ).add_to(mapa)
 
 # Logo estático en la esquina
 logo_url = "https://upload.wikimedia.org/wikipedia/commons/4/43/IMSS_Logo.png"
