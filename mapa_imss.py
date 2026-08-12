@@ -7,14 +7,11 @@ from streamlit_folium import st_folium
 st.set_page_config(layout="wide", page_title="Mapa Interactivo IMSS Oaxaca")
 st.title("Unidades Médicas en el OOAD Oaxaca IMSS")
 
-# --- MANUAL DE USUARIO DESPLEGABLE ---
-with st.expander("ℹ️ Guía rápida de uso (Haz clic para expandir)"):
+with st.expander("ℹ️ Guía rápida de uso"):
     st.markdown("""
-    **¿Cómo utilizar esta herramienta?**
-    1. **Estilo del Mapa:** Usa el panel lateral izquierdo para cambiar el fondo. La vista 'Satélite' es ideal para observar la geografía y orografía.
-    2. **Filtro de Unidades (Independiente):** Activa o desactiva las casillas para mostrar u ocultar Hospitales, UMF o UMR de la red global.
-    3. **Unidades Prioritarias (Siempre visibles):** Puedes escribir o seleccionar clínicas para destacar con un marcador especial y nombre permanente. **Nota:** Las unidades que selecciones aquí *siempre* se mostrarán en el mapa con su diseño destacado.
-    4. **Navegación:** Usa la rueda del ratón para hacer Zoom y haz clic sostenido para desplazarte.
+    1. **Estilo del Mapa:** Cambia entre mapa de calles, satélite o vista limpia.
+    2. **Filtros por Categoría:** Usa las casillas (checkbox) del panel izquierdo para prender o apagar todos los Hospitales, UMF o UMR.
+    3. **Unidades Prioritarias:** Debajo de cada casilla, puedes buscar y seleccionar unidades específicas. Estas se mostrarán con una **estrella verde** y su nombre visible permanentemente, sin importar si apagaste su categoría general.
     """)
 
 @st.cache_data
@@ -40,38 +37,93 @@ estilo_mapa = st.sidebar.selectbox(
     "1. Estilo geográfico del mapa:",
     ["Calles y Caminos", "Satélite (Tipo Google Maps)", "Mapa Claro (Sencillo)"]
 )
-
 st.sidebar.markdown("---")
+st.sidebar.markdown("**2. Filtros y Búsqueda por Tipo**")
 
-tipos_disponibles = df_oax['TIPO_SIMPLIFICADO'].unique().tolist()
-tipos_seleccionados = st.sidebar.multiselect(
-    "2. ¿Qué unidades deseas visualizar en el mapa general?",
-    options=tipos_disponibles,
-    default=tipos_disponibles
+# Inicializar listas vacías para las selecciones
+unidades_resaltadas_totales = []
+condiciones_mostrar = []
+
+# --- SECCIÓN HOSPITALES ---
+mostrar_hospitales = st.sidebar.checkbox("Mostrar todos los Hospitales", value=True)
+df_hospitales = df_oax[df_oax['TIPO_SIMPLIFICADO'] == 'Hospitales']
+resaltar_hosp = st.sidebar.multiselect(
+    "Destacar Hospital(es):", 
+    options=df_hospitales['NOMBRE DE LA UNIDAD'].unique(),
+    placeholder="Busca un hospital..."
 )
+unidades_resaltadas_totales.extend(resaltar_hosp)
+if mostrar_hospitales:
+    condiciones_mostrar.append(df_oax['TIPO_SIMPLIFICADO'] == 'Hospitales')
 
+st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espaciador
+
+# --- SECCIÓN UMF ---
+mostrar_umf = st.sidebar.checkbox("Mostrar todas las UMF (Clínicas)", value=True)
+df_umf = df_oax[df_oax['TIPO_SIMPLIFICADO'] == 'UMF (Clínicas)']
+resaltar_umf = st.sidebar.multiselect(
+    "Destacar UMF(s):", 
+    options=df_umf['NOMBRE DE LA UNIDAD'].unique(),
+    placeholder="Busca una clínica..."
+)
+unidades_resaltadas_totales.extend(resaltar_umf)
+if mostrar_umf:
+    condiciones_mostrar.append(df_oax['TIPO_SIMPLIFICADO'] == 'UMF (Clínicas)')
+
+st.sidebar.markdown("<br>", unsafe_allow_html=True) # Espaciador
+
+# --- SECCIÓN UMR ---
+mostrar_umr = st.sidebar.checkbox("Mostrar todas las UMR (Rurales)", value=True)
+df_umr = df_oax[df_oax['TIPO_SIMPLIFICADO'] == 'UMR (Rurales)']
+
+# Precargar las del Plan Amuzgo
 clues_amuzgo = ['OCIMS001985', 'OCIMS002970', 'OCIMS003892', 'OCIMS004172', 'OCIMS004691']
-nombres_amuzgo = df_oax[df_oax['CLUES'].isin(clues_amuzgo)]['NOMBRE DE LA UNIDAD'].tolist()
+nombres_amuzgo = df_umr[df_umr['CLUES'].isin(clues_amuzgo)]['NOMBRE DE LA UNIDAD'].tolist()
 
-unidades_resaltadas = st.sidebar.multiselect(
-    "3. Unidades prioritarias a destacar (Nombres Visibles y siempre activas):",
-    options=df_oax['NOMBRE DE LA UNIDAD'].unique(),
-    default=nombres_amuzgo
+resaltar_umr = st.sidebar.multiselect(
+    "Destacar UMR(s):", 
+    options=df_umr['NOMBRE DE LA UNIDAD'].unique(),
+    default=nombres_amuzgo,
+    placeholder="Busca una rural..."
 )
+unidades_resaltadas_totales.extend(resaltar_umr)
+if mostrar_umr:
+    condiciones_mostrar.append(df_oax['TIPO_SIMPLIFICADO'] == 'UMR (Rurales)')
 
-condicion_mostrar = (df_oax['TIPO_SIMPLIFICADO'].isin(tipos_seleccionados)) | (df_oax['NOMBRE DE LA UNIDAD'].isin(unidades_resaltadas))
-df_a_dibujar = df_oax[condicion_mostrar]
+# Consolidar lógica: Mostrar si está el checkbox activado OR si está en la lista de resaltadas
+condicion_final = df_oax['NOMBRE DE LA UNIDAD'].isin(unidades_resaltadas_totales)
+if condiciones_mostrar:
+    from functools import reduce
+    import operator
+    condicion_categorias = reduce(operator.or_, condiciones_mostrar)
+    condicion_final = condicion_final | condicion_categorias
+
+df_a_dibujar = df_oax[condicion_final]
 
 st.sidebar.markdown("---")
 
-# --- SIMBOLOGÍA VISUAL SEGURA ---
+# --- SIMBOLOGÍA EXACTA CON IMÁGENES ---
 st.sidebar.subheader("📌 Simbología del Mapa")
 st.sidebar.markdown("""
-* 🏥 **Hospitales** (Pin Rojo con 'H')
-* ✚ **UMF / Clínicas** (Pin Azul con '+')
-* 🟢 **UMR / Rurales** (Puntos Verdes)
-* ⭐ **Unidades Destacadas** (Pin Verde Oscuro)
-""")
+<div style="font-size: 14px; display: flex; flex-direction: column; gap: 15px;">
+    <div style="display: flex; align-items: center;">
+        <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png" width="16" style="margin-right: 10px;">
+        <span>Hospitales</span>
+    </div>
+    <div style="display: flex; align-items: center;">
+        <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png" width="16" style="margin-right: 10px;">
+        <span>UMF (Clínicas)</span>
+    </div>
+    <div style="display: flex; align-items: center;">
+        <div style="width: 14px; height: 14px; border-radius: 50%; background-color: #2c7c54; margin-right: 12px; margin-left: 1px;"></div>
+        <span>UMR (Puntos Verdes)</span>
+    </div>
+    <div style="display: flex; align-items: center;">
+        <img src="https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png" width="16" style="margin-right: 10px;">
+        <b>Unidades Destacadas</b>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # --- CONSTRUCCIÓN DEL MAPA ---
 if estilo_mapa == "Satélite (Tipo Google Maps)":
@@ -84,7 +136,15 @@ else:
     tiles = "CartoDB positron"
     attr = None
 
-mapa = folium.Map(location=[16.8, -96.5], zoom_start=7, tiles=tiles, attr=attr)
+mapa = folium.Map(location=[16.8, -96.5], zoom_start=7.5, tiles=tiles, attr=attr)
+
+# Diccionario de desplazamientos manuales para evitar solapamientos en unidades específicas
+desplazamientos = {
+    "SANTA MARÍA IPALAPA": "translate(-50%, 15px)", # Centro Abajo
+    "SAN PEDRO AMUZGOS": "translate(-50%, -45px)",  # Centro Arriba (lo aleja de Ipalapa)
+    "SAN VICENTE PIÑAS": "translate(15px, -15px)",  # Derecha
+    "SAN ANTONIO OCOTLÁN": "translate(-110%, -15px)", # Izquierda
+}
 
 for idx, row in df_a_dibujar.iterrows():
     lat = row['LATITUD']
@@ -95,28 +155,29 @@ for idx, row in df_a_dibujar.iterrows():
     
     tooltip_text = f"<b>{nombre}</b><br>Municipio: {municipio}<br>Tipo: {row['NOMBRE DE TIPOLOGIA']}"
     
-    if nombre in unidades_resaltadas:
-        # Marcador principal
+    if nombre in unidades_resaltadas_totales:
         folium.Marker(
             location=[lat, lon],
-            tooltip=tooltip_text + "<br><b>⭐ UNIDAD PRIORITARIA</b>",
-            icon=folium.Icon(color='darkgreen', icon='star', prefix='fa'),
+            tooltip=tooltip_text + "<br><b>⭐ UNIDAD DESTACADA</b>",
+            icon=folium.Icon(color='green', icon='star', prefix='fa'),
             z_index_offset=1000 
         ).add_to(mapa)
         
-        # Etiqueta de texto (Posicionada DEBAJO y CENTRADA para que nunca se oculte)
+        # Asignar desplazamiento específico o el por defecto (centro-abajo)
+        transformacion = desplazamientos.get(nombre, "translate(-50%, 15px)")
+        
         etiqueta_html = f"""
             <div style="
-                background-color: rgba(255, 255, 255, 0.9);
+                background-color: rgba(255, 255, 255, 0.95);
                 border: 2px solid #005c2a;
                 border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 12px;
-                font-weight: 900;
-                color: #000000;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: 800;
+                color: #000;
                 white-space: nowrap;
-                box-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-                transform: translate(-50%, 15px); /* Centra y baja */
+                box-shadow: 2px 2px 4px rgba(0,0,0,0.4);
+                transform: {transformacion};
                 display: inline-block;
             ">
                 {nombre}
@@ -136,7 +197,7 @@ for idx, row in df_a_dibujar.iterrows():
         elif tipo_simp == 'UMF (Clínicas)':
             folium.Marker(
                 location=[lat, lon], tooltip=tooltip_text,
-                icon=folium.Icon(color='blue', icon='plus', prefix='fa') # Cambié a 'plus' para evitar cruces cortadas
+                icon=folium.Icon(color='blue', icon='plus', prefix='fa') 
             ).add_to(mapa)
         elif tipo_simp == 'UMR (Rurales)':
             folium.CircleMarker(
